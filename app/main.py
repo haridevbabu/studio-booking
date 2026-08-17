@@ -78,7 +78,8 @@ async def grant_credit_pack(user_id: uuid.UUID, payload: CreditPackGrant, db: As
     if not user:
         raise HTTPException(status_code=404, detail="User target missing")
 
-    async with db.begin():
+    # Create an internal atomic sub-transaction context
+    async with db.begin_nested():
         pack = CreditPack(user_id=user_id, total_credits=payload.total_credits, expiry_date=payload.expiry_date)
         db.add(pack)
         await db.flush()
@@ -86,6 +87,7 @@ async def grant_credit_pack(user_id: uuid.UUID, payload: CreditPackGrant, db: As
         ledger = CreditLedger(user_id=user_id, credit_pack_id=pack.id, amount=payload.total_credits,
                               action_type="GRANT")
         db.add(ledger)
+    await db.commit()
 
     return {"status": "granted", "pack_id": pack.id}
 
@@ -108,12 +110,11 @@ async def get_ledger_statement(user_id: uuid.UUID, db: AsyncSession = Depends(ge
 
 
 @app.post("/bookings", response_model=BookingResponse)
-async def book_class(payload: BookingRequest, db: AsyncSession = Depends(get_db),
-                     current_user: User = Depends(get_current_user)) -> Any:
-    async with db.begin():
-        reservation, msg = await BookingService.book_class(db, current_user.id, payload.class_id)
-        return BookingResponse(reservation_id=reservation.id, class_id=reservation.class_id, status=reservation.status,
-                               message=msg)
+async def book_class(payload: BookingRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)) -> Any:
+    # Let BookingService execute its internal atomic transaction seamlessly
+    reservation, msg = await BookingService.book_class(db, current_user.id, payload.class_id)
+    return BookingResponse(reservation_id=reservation.id, class_id=reservation.class_id, status=reservation.status, message=msg)
+
 
 
 @app.get("/users/{user_id}/bookings", response_model=List[ReservationResponse])
@@ -126,7 +127,7 @@ async def list_user_bookings(user_id: uuid.UUID, db: AsyncSession = Depends(get_
 
 
 @app.delete("/bookings/{reservation_id}")
-async def cancel_booking(reservation_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                         current_user: User = Depends(get_current_user)) -> Dict[str, str]:
-    async with db.begin():
-        return await BookingService.cancel_booking(db, current_user.id, reservation_id)
+async def cancel_booking(reservation_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)) -> Dict[str, str]:
+    # Pass the context safely to service controllers
+    return await BookingService.cancel_booking(db, current_user.id, reservation_id)
+
