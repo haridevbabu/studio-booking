@@ -25,3 +25,31 @@ studio-booking-app/
 ├── pytest.ini                 # Testing directions for coverage
 └── requirements.txt           # dependencies list
 ```
+
+**Commands Reference**
+
+**Container Lifecycle Management**
+```
+# Build the multi-stage image and start all containers in detached background mode
+docker compose up --build -d
+
+# Stop all running containers without deleting database storage volumes
+docker compose down
+
+# Stop all containers and completely wipe local PostgreSQL volumes (Full System Reset)
+docker compose down -v
+
+# View real-time aggregated system logs
+docker compose logs -f
+```
+**Testing using pytest**
+```
+# Spin up a completely fresh, isolated container instance, run tests, and self-destruct
+docker compose run --rm web pytest
+```
+**API Documentation** 
+**Interactive Swagger UI API Documentation:**
+```
+**[http://localhost:8000/docs]**
+**[http://localhost:8000/docs]**
+```
