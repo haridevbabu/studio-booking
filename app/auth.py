@@ -31,4 +31,5 @@ def require_staff(current_user: User = Depends(get_current_user)) -> User:
 
 def enforce_owner_or_staff(target_user_id: uuid.UUID, current_user: User) -> None:
     if not current_user.is_staff and current_user.id != target_user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied: Resource belongs to another user")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Access Denied: Resource belongs to another user")

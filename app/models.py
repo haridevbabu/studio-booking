@@ -42,7 +42,8 @@ class FitnessClass(Base):
     credit_cost: Mapped[int] = mapped_column(Integer, default=1)
 
     studio: Mapped["Studio"] = relationship(back_populates="fitness_classes")
-    reservations: Mapped[list["Reservation"]] = relationship(back_populates="fitness_class", cascade="all, delete-orphan")
+    reservations: Mapped[list["Reservation"]] = relationship(back_populates="fitness_class",
+                                                             cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("available_spots >= 0", name="check_spots_non_negative"),
@@ -60,7 +61,8 @@ class CreditPack(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="credit_packs")
-    ledger_entries: Mapped[list["CreditLedger"]] = relationship(back_populates="credit_pack", cascade="all, delete-orphan")
+    ledger_entries: Mapped[list["CreditLedger"]] = relationship(back_populates="credit_pack",
+                                                                cascade="all, delete-orphan")
 
 
 class CreditLedger(Base):
@@ -68,8 +70,10 @@ class CreditLedger(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    credit_pack_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_packs.id", ondelete="SET NULL"), nullable=True)
-    reservation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("reservations.id", ondelete="SET NULL"), nullable=True) # Linked precise refund mapping
+    credit_pack_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_packs.id", ondelete="SET NULL"),
+                                                             nullable=True)
+    reservation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("reservations.id", ondelete="SET NULL"),
+                                                             nullable=True) # Linked precise refund mapping
     amount: Mapped[int] = mapped_column(Integer)
     action_type: Mapped[str] = mapped_column(String(50))  # GRANT, BOOKING, CANCEL_REFUND
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
@@ -85,12 +89,14 @@ class Reservation(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     class_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fitness_classes.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="CONFIRMED")  # CONFIRMED, WAITLISTED, CANCELLED, WAITLIST_LEFT
+    status: Mapped[str] = mapped_column(String(20), default="CONFIRMED")
+    # CONFIRMED, WAITLISTED, CANCELLED, WAITLIST_LEFT
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     fitness_class: Mapped["FitnessClass"] = relationship(back_populates="reservations")
     user: Mapped["User"] = relationship(back_populates="reservations")
-    ledger_entries: Mapped[list["CreditLedger"]] = relationship(back_populates="reservation", cascade="all, delete-orphan")
+    ledger_entries: Mapped[list["CreditLedger"]] = relationship(back_populates="reservation",
+                                                                cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_res_class_status_created", "class_id", "status", "created_at"),

@@ -149,6 +149,11 @@ class BookingService:
         fitness_class = class_exec.scalar_one()
 
         studio = await db.get(Studio, fitness_class.studio_id)
+        if not studio:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Studio configuration records could not be located."
+            )
 
         studio_tz = ZoneInfo(studio.timezone)
         now_local = datetime.now(timezone.utc).astimezone(studio_tz)
