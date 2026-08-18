@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user, require_staff, enforce_owner_or_staff
 from app.database import get_db
+from sqlalchemy.exc import IntegrityError
 from app.models import CreditLedger, CreditPack, FitnessClass, Reservation, Studio, User, IdempotencyKey
 from app.schemas import (
     BalanceReport, BookingRequest, BookingResponse, ClassCreate, ClassResponse,
@@ -26,10 +27,24 @@ app = FastAPI(title="Studio Booking Platform Engine", version="2.0.0", lifespan=
 
 
 @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
-    user = User(email=payload.email, name=payload.name, is_staff=payload.is_staff)
+async def create_user(
+        payload: UserCreate, db: AsyncSession = Depends(get_db)
+) -> User:
+    user = User(
+        email=payload.email, name=payload.name, is_staff=payload.is_staff
+    )
     db.add(user)
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError as err:
+        # Roll back the failed transaction state immediately
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user configuration profile with this email already exists."
+        ) from err
+
     await db.refresh(user)
     return user
 
