@@ -6,9 +6,12 @@ from app.models import User
 
 
 async def get_current_user(
-        x_user_id: str = Header(..., description="Simulated Auth Header via User ID UUID"),
+        x_user_id: str | None = Header(None, alias="X-User-Id", description="Simulated Auth Header via User ID UUID"),
         db: AsyncSession = Depends(get_db)
 ) -> User:
+    if not x_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token header missing.")
+
     try:
         user_uuid = uuid.UUID(x_user_id)
     except ValueError:
@@ -28,5 +31,4 @@ def require_staff(current_user: User = Depends(get_current_user)) -> User:
 
 def enforce_owner_or_staff(target_user_id: uuid.UUID, current_user: User) -> None:
     if not current_user.is_staff and current_user.id != target_user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Access Denied: Resource belongs to another user")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied: Resource belongs to another user")
