@@ -1,13 +1,14 @@
 import uuid
+import json
 from datetime import datetime
 from typing import Any, Dict, List, AsyncGenerator
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user, require_staff, enforce_owner_or_staff
-from app.database import Base, engine, get_db
-from app.models import CreditLedger, CreditPack, FitnessClass, Reservation, Studio, User
+from app.database import get_db
+from app.models import CreditLedger, CreditPack, FitnessClass, Reservation, Studio, User, IdempotencyKey
 from app.schemas import (
     BalanceReport, BookingRequest, BookingResponse, ClassCreate, ClassResponse,
     CreditPackGrant, LedgerEntrySchema, ReservationResponse, StudioCreate, StudioResponse,
@@ -18,8 +19,6 @@ from app.services import BookingService, LedgerService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield
 
 
@@ -55,7 +54,8 @@ async def schedule_class(studio_id: uuid.UUID, payload: ClassCreate, db: AsyncSe
 
     fitness_class = FitnessClass(
         studio_id=studio_id, name=payload.name, instructor=payload.instructor,
-        start_time=payload.start_time, total_capacity=payload.total_capacity, available_spots=payload.total_capacity
+        start_time=payload.start_time, total_capacity=payload.total_capacity,
+        available_spots=payload.total_capacity, credit_cost=payload.credit_cost
     )
     db.add(fitness_class)
     await db.commit()
@@ -78,7 +78,6 @@ async def grant_credit_pack(user_id: uuid.UUID, payload: CreditPackGrant, db: As
     if not user:
         raise HTTPException(status_code=404, detail="User target missing")
 
-    # Create an internal atomic sub-transaction context
     async with db.begin_nested():
         pack = CreditPack(user_id=user_id, total_credits=payload.total_credits, expiry_date=payload.expiry_date)
         db.add(pack)
@@ -88,7 +87,6 @@ async def grant_credit_pack(user_id: uuid.UUID, payload: CreditPackGrant, db: As
                               action_type="GRANT")
         db.add(ledger)
     await db.commit()
-
     return {"status": "granted", "pack_id": pack.id}
 
 
@@ -110,11 +108,35 @@ async def get_ledger_statement(user_id: uuid.UUID, db: AsyncSession = Depends(ge
 
 
 @app.post("/bookings", response_model=BookingResponse)
-async def book_class(payload: BookingRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)) -> Any:
-    # Let BookingService execute its internal atomic transaction seamlessly
-    reservation, msg = await BookingService.book_class(db, current_user.id, payload.class_id)
-    return BookingResponse(reservation_id=reservation.id, class_id=reservation.class_id, status=reservation.status, message=msg)
+async def book_class(
+        payload: BookingRequest,
+        idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+) -> Any:
+    if idempotency_key:
+        async with db.begin_nested():
+            existing_key_query = select(IdempotencyKey).where(IdempotencyKey.key == idempotency_key)
+            exec_key = await db.execute(existing_key_query)
+            record = exec_key.scalar_one_or_none()
+            if record:
+                if record.user_id != current_user.id:
+                    raise HTTPException(status_code=403, detail="Idempotency key owner mismatch.")
+                return BookingResponse(**json.loads(record.response_body))
 
+    reservation, msg = await BookingService.book_class(db, current_user.id, payload.class_id)
+    response_payload = BookingResponse(reservation_id=reservation.id, class_id=reservation.class_id,
+                                       status=reservation.status, message=msg)
+
+    if idempotency_key:
+        async with db.begin_nested():
+            db.add(IdempotencyKey(
+                key=idempotency_key, user_id=current_user.id, response_code=200,
+                response_body=json.dumps(response_payload.model_dump(), default=str)
+            ))
+
+    await db.commit()
+    return response_payload
 
 
 @app.get("/users/{user_id}/bookings", response_model=List[ReservationResponse])
@@ -127,7 +149,8 @@ async def list_user_bookings(user_id: uuid.UUID, db: AsyncSession = Depends(get_
 
 
 @app.delete("/bookings/{reservation_id}")
-async def cancel_booking(reservation_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)) -> Dict[str, str]:
-    # Pass the context safely to service controllers
-    return await BookingService.cancel_booking(db, current_user.id, reservation_id)
-
+async def cancel_booking(reservation_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)) -> Dict[str, str]:
+    res = await BookingService.cancel_booking(db, current_user.id, reservation_id)
+    await db.commit()
+    return res
