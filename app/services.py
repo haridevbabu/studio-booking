@@ -138,7 +138,6 @@ class BookingService:
         res_exec = await db.execute(res_query)
         reservation = res_exec.scalar_one_or_none()
 
-        # Business Rule 13: Prevent repetitive cancellations from double-refunding
         if not reservation or reservation.status in ["CANCELLED", "WAITLIST_LEFT"]:
             raise HTTPException(status_code=404, detail="Active reservation context missing or already cancelled.")
 
@@ -151,7 +150,6 @@ class BookingService:
 
         studio = await db.get(Studio, fitness_class.studio_id)
 
-        # Business Rule 8: Evaluate cancellation thresholds against Studio IANA local timezone
         studio_tz = ZoneInfo(studio.timezone)
         now_local = datetime.now(timezone.utc).astimezone(studio_tz)
         class_start_local = fitness_class.start_time.replace(tzinfo=timezone.utc).astimezone(studio_tz)
@@ -171,12 +169,10 @@ class BookingService:
         if was_confirmed:
             fitness_class.available_spots += 1
             if not is_late_cancel:
-                # Business Rule 7: Early cancellation returns credit in full
                 await BookingService._refund_reservation_credits(db, user_id, reservation.id)
                 await BookingService._promote_waitlist(db, fitness_class.id)
                 return {"status": "success", "message": "Early cancellation processed. Credit returned."}
             else:
-                # Business Rule 7: Late cancellation forfeits credits, but releases physical spot
                 await BookingService._promote_waitlist(db, fitness_class.id)
                 return {"status": "success", "message": "Late cancellation processed. Credit forfeited."}
 
